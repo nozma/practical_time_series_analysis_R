@@ -11,6 +11,8 @@ library(dplyr)
 library(tidyr)
 library(lubridate)
 library(purrr)
+library(ggplot2)
+theme_set(theme_bw())
 ```
 
 ## 2.2 表データの集合から時系列データの集合を作成する
@@ -143,4 +145,86 @@ all_email %>%
 merged_df %>% 
   filter(user == 998)
 ```
+
+## 2.4 データのクリーニング
+
+### 2.4.1 欠損値の処理
+
+#### p.38 データの準備
+
+もともとRのコードだが、本文のコードは下から2行目が誤っている。
+
+- 誤: `high.unemp.idx <- sample(high.unemp.idx,)`
+- 正: `high.unemp.idx <- sample(high.unemp.idx, num.to.select)`
+
+その他の記述もやや冗長なので書き直した。
+
+```{r}
+unemp <- read_csv(
+  "https://raw.githubusercontent.com/PracticalTimeSeriesAnalysis/BookRepo/master/Ch02/data/UNRATE.csv",
+  col_types = "Dn"
+)
+
+# 無作為に欠損させたデータセットを生成する
+set.seed(778)
+unemp %>% 
+  slice_sample(prop = 0.9) -> rand_unemp
+
+# 失業率が高い月に欠損している確率が高いデータセットを生成する
+unemp %>% 
+  anti_join(
+    # 失業率8を超えるレコードの20%を抽出し、anti_joinで除外
+    unemp %>% filter(UNRATE > 8) %>% slice_sample(prop = 0.2),
+    by = c("DATE", "UNRATE")
+  ) -> bias_unemp
+```
+
+
+#### p.40 欠損させたデータの日付とNAを補う
+
+書籍ではrolling joinを使用しているが、使わなくとも可能かつ現行バージョンのdplyrではrolling joinができないので別の方法で埋める。
+
+```{r}
+all_dates <- seq(min(unemp$DATE), max(unemp$DATE), by = "1 month")
+tibble(DATE = all_dates) %>% 
+  left_join(rand_unemp, by = "DATE") %>% 
+  mutate(missing = is.na(UNRATE)) -> rand_unemp
+tibble(DATE = all_dates) %>% 
+  left_join(bias_unemp, by = "DATE") %>% 
+  mutate(missing = is.na(UNRATE)) -> bias_unemp
+```
+
+
+#### p.41-42 前方埋め
+
+前方埋めをした上でp.41の作図まで行う。
+
+```{r}
+unemp %>% 
+  mutate(group = "original") %>% 
+  union_all(
+    rand_unemp %>% 
+      fill(UNRATE, .direction = "down") %>% # 前方埋め
+      mutate(group = "random missing")
+  ) %>% 
+  ggplot(aes(x = DATE, y = UNRATE, color = group)) +
+  geom_line() +
+  geom_point(data = . %>% filter(missing)) +
+  lims(x = c(ymd("1977/01/01"), ymd("1981/12/31")))
+```
+p.42の作図
+
+```{r}
+unemp %>% 
+  rename(original = UNRATE) %>% 
+  left_join(
+    rand_unemp %>% 
+      fill(UNRATE, .direction = "down") %>% # 前方埋め
+      rename(random_missing = UNRATE),
+    by = "DATE"
+  ) %>% 
+  ggplot(aes(x = original, y = random_missing, color = missing)) +
+  geom_point()
+```
+
 
