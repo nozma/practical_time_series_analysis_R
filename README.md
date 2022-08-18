@@ -8,3 +8,5 @@
 - `lubridate`...時間・日付の処理。
 - `purrr`...`map`など。
 - `ggplot2`...グラフ作成に。
+- `zoo`...移動平均計算に。
+- `imputeTS`...補完に。
