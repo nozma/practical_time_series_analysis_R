@@ -5,7 +5,9 @@ date: "2022-08-17"
 output: github_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=TRUE, message=FALSE}
+knitr::opts_chunk$set(warning = FALSE)
+
 library(readr)
 library(dplyr)
 library(tidyr)
@@ -15,6 +17,8 @@ library(ggplot2)
 theme_set(theme_bw())
 library(zoo)
 library(imputeTS)
+library(reticulate)
+library(ggfortify)
 ```
 
 ## 2.2 表データの集合から時系列データの集合を作成する
@@ -352,4 +356,208 @@ calc_mse(bias_unemp)
 ```
 
 ### 2.4.2 アップサンプリングとダウンサンプリング
+
+#### p.49 `unemp`から1月のデータのみ抜き出す。
+
+```{r}
+unemp %>% 
+  filter(month(DATE) == 1)
+```
+
+#### p.49 年単位の平均をとる
+
+```{r}
+unemp %>% group_by(year(DATE)) %>% summarise(mean(UNRATE))
+```
+
+#### p.50 不規則な時系列をアップサンプリングする
+
+```{r}
+# p.40と同じ内容のため略
+```
+
+#### p.51 月初の値で月内の値を補う
+
+月初から月末までの日付を生成して`unnest`。
+
+```{r}
+unemp %>% 
+  mutate(
+    DATE = map(DATE, ~seq(.x, .x + months(1) - days(1), by = "day"))
+  ) %>% 
+  unnest(DATE)
+```
+
+### 2.4.3 データの平滑化
+
+#### p.54 指数平滑法
+
+例示されている航空旅客データはRだと標準パッケージの`datasets`に含まれている`AirPassengers`が該当する。
+
+```{r}
+AirPassengers
+```
+
+pandasのpandas.DataFrame.ewmの`adjust=True`と同等の機能を持った関数を定義
+
+```{r}
+my_ewm <- function(x, a = NULL, adjust = TRUE) {
+  nx <- length(x)
+  if(is.null(a)) a = 2 / (nx + 1)
+  y <- numeric(nx)
+  y[1] <- x[1]
+  if(adjust){
+    a_adj <- 1
+    w_sum <- x[1]
+  }
+  for (k in 2:nx) {
+    if(adjust) {
+      a_adj <- a_adj + (1 - a)^(k - 1)
+      w_sum <- (x[k] + (1 - a) * w_sum)
+      y[k] <-  w_sum / a_adj
+    } else {
+      y[k] <- a * x[k] + (1 - a) * y[k - 1]
+    }
+  }
+  return(y)
+}
+```
+
+pandasのewmをreticulateを使って呼び出し、自作の平滑化関数を比較し、結果が一致することを確認。
+
+```{r}
+pd <- import("pandas")
+
+data.frame(
+  Passengers = AirPassengers,
+  my_ewm_5 = my_ewm(AirPassengers, 0.5),
+  pd_ewm_5 = pd$DataFrame$ewm(
+    data.frame(AirPassengers), 
+    alpha = 0.5)$mean() %>% pull,
+  my_ewm_9 = my_ewm(AirPassengers, 0.9),
+  pd_ewm_9 = pd$DataFrame$ewm(
+    data.frame(AirPassengers), 
+    alpha = 0.9)$mean() %>% pull
+  ) %>% head()
+```
+
+## 2.5 季節性データ
+
+#### p.57のグラフ
+
+```{r}
+AirPassengers %>% plot(type = "p")
+```
+
+
+```{r}
+AirPassengers %>% plot()
+```
+
+#### p.58のグラフ
+
+```{r}
+plot(stl(AirPassengers, "periodic"))
+```
+
+`ggfortify`を使う場合。
+
+```{r}
+autoplot(stl(AirPassengers, "periodic"))
+```
+
+## 2.6 タイムゾーン
+
+#### p.60 
+
+参考: [A Tour of Timezones (& Troubles) in R | R-bloggers](https://www.r-bloggers.com/2018/07/a-tour-of-timezones-troubles-in-r/)
+
+`as.POSIXct()`はタイムゾーンを指定しないと、ローカルのタイムゾーンが自動で適用される。実行環境に依存するので割と危ない。
+
+```{r}
+x <- "2022-01-01 12:00:00"
+as.POSIXct(x)
+Sys.timezone()
+as.POSIXct(x, tz = "America/Chicago")
+```
+
+`as.POSIXct()`でPOSIXctオブジェクトを作成した場合、`tz = `でタイムゾーンを指定しても時計の時刻は同じ。
+
+```{r}
+as.POSIXct(x, tz = "America/Chicago") - as.POSIXct(x)
+```
+
+`tz =`が不正なものである場合はGMT(UTC)で返る。以前は警告が出なかったらしいが今は出る。
+
+```{r warning=TRUE}
+as.POSIXct(x, tz = "America/Ypsilanti")
+```
+
+有効な名前は`OlsonName()`で一覧を得られるので、有効かどうかの判定はできる。
+
+```{r}
+c("America/Chicago", "America/Detroit", "America/Ypsilanti") %in% OlsonNames()
+```
+
+`lubridate`を使う場合。
+
+`lubridate::as_datetime()`はデフォルトでUTCを返すので、実行環境によりタイムゾーンが意図せず変わる心配をしなくて良い。
+
+```{r}
+as_datetime(x)
+```
+
+生成されるオブジェクトはPOSIXctであるため、他のパッケージの関数に渡すような場合でも問題はない。
+
+```{r}
+as_datetime(x) %>% class()
+```
+
+タイムゾーンの指定も可。
+
+```{r}
+as_datetime(x, tz = "Asia/Tokyo")
+```
+
+正しくないタイムゾーンの名前を指定した場合、警告ではなくエラーが出るのでこの点も安心。
+
+```{r error=TRUE}
+as_datetime(x, tz = "Asia/Tokyu")
+```
+
+```{r}
+# サンプルデータ生成
+tbl <- tibble(datetime = ymd_hm("2018-03-10 23:30") + hours(c(1, 2, 4, 5, 6)))
+```
+
+```{r}
+tz(tbl$datetime)
+```
+
+`lubridate::force_tz()`は表示されている時刻は変更せずにタイムゾーンを変更する(つまりclock timeが維持されて、UTCとしての時刻は変わる)。
+
+```{r}
+tbl %>% 
+  mutate(datetime = force_tz(datetime, "America/New_York")) -> tbl
+tbl
+```
+
+```{r}
+tz(tbl$datetime)
+```
+
+```{r}
+diff(tbl$datetime)
+```
+
+`lubridate::with_tz()`はUTCとしての時刻が維持されて、表示上の時刻であるclock timeを変更してタイムゾーンを変更する。
+
+```{r}
+tbl %>% 
+  mutate(datetime = with_tz(datetime, "Asia/Tokyo")) -> tbl
+tbl
+```
+```{r}
+tz(tbl$datetime)
+```
 
