@@ -1,0 +1,162 @@
+---
+title: "3章 時系列の探索的データ解析"
+author: '@nozma'
+date: "`r Sys.Date()`"
+output: github_document
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(warning = FALSE)
+library(dplyr)
+library(ggplot2)
+theme_set(theme_bw())
+library(lubridate)
+library(tidyr)
+library(forcats)
+library(patchwork)
+```
+
+## 3.1 よく使用される手法
+
+### 3.1.1 プロット
+
+#### p.70-71
+
+```{r}
+EuStockMarkets %>% head()
+```
+
+```{r}
+plot(EuStockMarkets)
+```
+
+#### p.72
+
+```{r}
+frequency(EuStockMarkets)
+start(EuStockMarkets)
+end(EuStockMarkets)
+```
+
+```{r}
+window(EuStockMarkets, start = 1997, end = 1998) %>% head()
+```
+
+データフレームにする場合、`time()`で抽出したタイムスタンプに`lubiridate::date_decimal()`を使うとPOSIXctでの表現を得られる。
+
+```{r}
+EuStockMarkets %>% 
+  as_tibble() %>% 
+  mutate(Time = time(EuStockMarkets) %>% as.numeric() %>% date_decimal()) -> df
+df
+```
+
+`ggplot2`でのプロット。
+
+```{r}
+df %>% 
+  pivot_longer(cols = DAX:FTSE) %>% 
+  mutate(name = fct_inorder(name)) -> #順序調整
+  df_longer
+df_longer %>% 
+  ggplot(aes(x = Time, y = value)) +
+  geom_line() +
+  facet_grid(name ~ .)
+```
+
+要約。
+
+```{r}
+df %>% 
+  mutate(Year = year(Time)) %>% 
+  count(Year)
+```
+
+```{r}
+df %>% 
+  summarise(
+    start = min(Time),
+    end = max(Time)
+  )
+```
+
+抽出。`window()`とは結果が若干異なる。`window(EuStockMarkets, start = 1997, end = 1998)`だと末尾は`1998.000`になり、1998年の最初のレコードが含まれるため。
+
+```{r}
+df %>% 
+  filter(Time >= "1997/01/01", Time < "1998/01/01")
+```
+
+### 3.1.2 ヒストグラム
+
+#### p.73
+
+```{r}
+df_longer %>% 
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_grid(name ~ ., scales = "free_y")
+```
+
+階差のヒストグラム。
+
+```{r}
+df %>% 
+  select(!Time) %>% 
+  mutate_all(~.x - lag(.x)) %>% 
+  na.omit() %>% 
+  pivot_longer(cols = everything()) %>% 
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_grid(name ~ .)
+```
+
+書籍のヒストグラムと結果が違うが、書籍のコードが誤っているのが原因。
+ヒストグラムの`breaks`引数の値として`30`を渡すつもりのところ、括弧の位置が誤っていて`diff`の`lag`引数に`30`を渡してしまっており、`lag = 30`の階差のヒストグラムとなってしまっている。
+
+- 誤: `hist(diff(EuStockMarkets[, "SMI"], 30))`
+- 正: `hist(diff(EuStockMarkets[, "SMI"]), 30)`
+
+### 3.1.3 散布図
+
+#### p.74-45
+
+```{r}
+df %>% 
+  ggplot(aes(x = SMI, y = DAX)) +
+  geom_point() -> p1
+df %>% 
+  select(!Time) %>% 
+  mutate_all(~.x - lag(.x)) %>% 
+  na.omit() %>% 
+  ggplot(aes(x = SMI, y = DAX)) +
+  geom_point() +
+  labs(x = "diff(SMI)", y = "diff(DAX)") -> p2
+
+p1 / p2
+```
+
+#### p.75-76
+
+「一つ前にシフト」は`dplyr::lead`で行う。
+
+```{r}
+df %>% 
+  mutate(
+    SMI = lead(SMI - lag(SMI)),
+    DAX = DAX - lag(DAX)
+  ) %>% 
+  ggplot(aes(x = SMI, y = DAX)) +
+  geom_point()
+```
+
+## 3.2 時系列専用の探索手法
+
+### 3.2.1 定常性とは
+
+#### p.78
+
+```{r}
+plot(AirPassengers)
+```
+
