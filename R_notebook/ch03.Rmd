@@ -280,3 +280,55 @@ ggPacf(y) -> pacf_y
 (p_y + acf_y + pacf_y)
 ```
 
+データにノイズを増やす。
+
+```{r, fig.height=7, fig.width=7}
+set.seed(778)
+noise1 <- rnorm(100, sd = 0.05)
+noise2 <- rnorm(100, sd = 0.05)
+
+fp <- function(y) {
+  tibble(y, Index = seq_along(y)) %>% 
+    ggplot(aes(x = Index, y = y)) +
+    geom_line() + geom_point() -> p1
+  ggAcf(y) -> p2
+  ggPacf(y) -> p3
+  p1 + p2 + p3
+}
+
+fp(y1 + noise1) / fp(y2 + noise2) / fp(y1 + y2 + noise1 + noise2)
+```
+
+ノイズを大きくする。
+
+```{r, fig.height=7, fig.width=7}
+noise1 <- rnorm(100, sd = 0.5)
+noise2 <- rnorm(100, sd = 0.5)
+
+fp(y1 + noise1) / fp(y2 + noise2) / fp(y1 + y2 + noise1 + noise2)
+```
+
+#### p.94 非定常なデータ
+
+書籍とはACFの結果が異なる。書籍と類似の結果はデータを`x <- 1:1000`などとすると得られる。
+
+```{r}
+x <- 1:100
+fp2 <- function(y) {
+  tibble(y, Index = seq_along(y)) %>% 
+    ggplot(aes(x = Index, y = y)) +
+    geom_line() + geom_point() -> p1
+  ggAcf(y) -> p2
+  ggPacf(y) -> p3
+  p1 / p2 / p3
+}
+fp2(x)
+```
+
+#### p.95 AirPassengersのACF、PACFを求める
+
+```{r}
+ggAcf(AirPassengers) / ggPacf(AirPassengers)
+```
+
+
