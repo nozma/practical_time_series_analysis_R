@@ -52,6 +52,13 @@ EuStockMarkets %>%
   mutate(Time = time(EuStockMarkets) %>% as.numeric() %>% date_decimal()) -> df
 df
 ```
+`timetk::tk_tbl()`の方が良いかもしれない。
+
+```{r}
+timetk::tk_tbl(EuStockMarkets) %>% 
+  mutate(Time = date_decimal(index))
+```
+
 
 `ggplot2`でのプロット。
 
@@ -331,4 +338,92 @@ fp2(x)
 ggAcf(AirPassengers) / ggPacf(AirPassengers)
 ```
 
+## 3.3 知っていると便利な可視化手法
+
+### 3.3.1 1次元の可視化
+
+書籍で紹介されている`timevis`は出力をインタラクティブに操作できるが画像にすることが難しく、このレポートに含められないので`ggplot2`で類似のプロットを作成した。
+
+```{r}
+set.seed(778)
+
+# データ読み込み
+donations <- readr::read_csv(
+  "https://raw.githubusercontent.com/PracticalTimeSeriesAnalysis/BookRepo/master/Ch02/data/donations.csv",
+  col_types = "nTn"
+) %>% mutate(user = as.integer(user))
+
+# データ整形
+donations %>% 
+  group_by(user) %>% 
+  summarise(
+    start = min(timestamp),
+    end = max(timestamp)
+  ) %>% 
+  filter(start != end) %>% 
+  sample_n(20) %>% 
+  arrange(desc(start), desc(end)) %>% 
+  mutate(row = row_number()) %>% 
+# プロット
+#    参考: "Make a timeline graph with dates in ggplot2" 
+#    https://rforpoliticalscience.com/2021/02/25/make-a-timeline-graph-with-dates-in-ggplot2/
+  ggplot(
+    aes(x = start, xend = end,
+        y = row, yend = row,
+        label = user)
+  ) +
+  geom_segment(size = 6, color = "lightblue") +
+  geom_text(hjust = -0.2) +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
+  labs(x = "", y = "")
+```
+
+### 3.2.2 2次元の可視化
+
+#### p.101 毎月の値を年別にプロット
+
+`AirPassengers`を年別にプロットする。
+
+`forecast::seasonplot()`にはggplot2版として`forecast::ggseasonplot()`もある。時期ごとに色が分けられる、極座標表示のオプションがあるなどの点でggplot2版の方が優れているように思われる。
+
+```{r}
+ggseasonplot(
+  AirPassengers, 
+  year.labels = TRUE
+)
+```
+
+#### p.103 毎年の値を月別にプロット
+
+```{r}
+timetk::tk_tbl(AirPassengers) %>% 
+  mutate(
+    year = year(index),
+    month = factor(month(index))
+  ) %>% 
+  ggplot(aes(x = year, y = value, col = month)) +
+  geom_line()
+```
+
+
+#### p.103 monthplot
+
+書籍では`monthplot()`について「`forecast`パッケージに用意されている簡単な可視化関数」と紹介しているが、`monthplot()`は`stats`パッケージに含まれる標準関数である。
+
+`forecast`に用意されている類似の関数としては`ggmonthplot()`および`ggsubseriesplot()`がある。`ggmonthplot()`は`monthplot()`に慣れたユーザーのために用意された単純なラッパー関数で、以下のように単純に`ggsubseriesplot()`を呼び出しているだけなので基本的には`ggsubseriesplot()`を使えば良い。
+
+```{r}
+ggmonthplot
+```
+
+`ggmonthplot()`だとy軸ラベルが`x`となってしまうので、その点でも`ggsubseriesplot()`を利用した方が良い。詳しく確認していないが、おそらく呼び出し方の関係で仮引数のオブジェクト名がそのまま使われてしまうのだと思う。
+
+```{r}
+ggmonthplot(AirPassengers)
+```
+
+
+```{r}
+ggsubseriesplot(AirPassengers)
+```
 
